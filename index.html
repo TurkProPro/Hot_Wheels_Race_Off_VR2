@@ -3,151 +3,161 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hot Wheels Unleashed - 3D Sahne</title>
+    <title>Hot Wheels 3D - Fizik & Sürüş</title>
     <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            background-color: #000;
-        }
-        canvas {
-            display: block;
-        }
+        body { margin: 0; overflow: hidden; background-color: #000; }
         #loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
+            position: absolute; top: 50%; left: 50%;
             transform: translate(-50%, -50%);
-            color: white;
-            font-family: sans-serif;
-            font-size: 24px;
-            pointer-events: none;
+            color: white; font-family: sans-serif; font-size: 24px; pointer-events: none;
+        }
+        #controls-info {
+            position: absolute; top: 10px; left: 10px; color: white;
+            font-family: sans-serif; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 5px;
         }
     </style>
 
-    <!-- Import Maps: Three.js ve eklentileri için modern modül yapısı -->
     <script type="importmap">
         {
             "imports": {
                 "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
             }
         }
     </script>
 </head>
 <body>
-    <div id="loading">Modeller Yükleniyor...</div>
+    <div id="loading">Modeller ve Fizik Yükleniyor...</div>
+    <div id="controls-info">
+        <b>Kontroller:</b><br>
+        W / Yukarı Ok: Gaz<br>
+        S / Aşağı Ok: Fren / Geri<br>
+        A / D - Sol / Sağ Ok: Direksiyon<br>
+        Uzay (Space): El Freni
+    </div>
 
     <script type="module">
         import * as THREE from 'three';
-        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
         import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+        import * as CANNON from 'cannon-es';
 
-        // 1. Sahne, Kamera ve Render Yöneticisi
+        // 1. Three.js Görsel Sahne
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x1a1a1a);
 
-        const camera = new THREE.PerspectiveCamera(
-            75, 
-            window.innerWidth / window.innerHeight, 
-            0.1, 
-            1000
-        );
-        camera.position.set(0, 5, 10);
-
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
         renderer.shadowMap.enabled = true;
         document.body.appendChild(renderer.domElement);
 
-        // 2. Kamera Kontrolleri (Fare ile Döndürme/Yakınlaşma)
-        const controls = new OrbitControls(camera, renderer.domElement);
-        controls.enableDamping = true;
-
-        // 3. Aydınlatma
+        // Işıklar
         const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
         scene.add(ambientLight);
-
         const dirLight = new THREE.DirectionalLight(0xffffff, 2);
-        dirLight.position.set(10, 20, 10);
+        dirLight.position.set(20, 40, 20);
         dirLight.castShadow = true;
         scene.add(dirLight);
 
-        // 4. Adaptörler ve Yükleyiciler (GLTF/GLB + DRACO Decoder Adaptörü)
+        // 2. Cannon.es Fizik Dünyası
+        const world = new CANNON.World();
+        world.gravity.set(0, -9.82, 0);
+        world.broadphase = new CANNON.SAPBroadphase(world);
+
+        // Zemin Malzemesi & Sürtünme Ayarları
+        const groundMaterial = new CANNON.Material('ground');
+        const wheelMaterial = new CANNON.Material('wheel');
+        const wheelGroundContactMaterial = new CANNON.ContactMaterial(wheelMaterial, groundMaterial, {
+            friction: 0.8,
+            restitution: 0.1,
+            contactEquationStiffness: 1e8
+        });
+        world.addContactMaterial(wheelGroundContactMaterial);
+
+        // Fiziksel Zemin (Düz Pist Alanı)
+        const groundBody = new CANNON.Body({
+            type: CANNON.Body.STATIC,
+            shape: new CANNON.Plane(),
+            material: groundMaterial
+        });
+        groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+        world.addBody(groundBody);
+
+        // 3. Araç Fiziği (RaycastVehicle)
+        const chassisShape = new CANNON.Box(new CANNON.Vec3(1, 0.4, 2));
+        const chassisBody = new CANNON.Body({ mass: 150 });
+        chassisBody.addShape(chassisShape);
+        chassisBody.position.set(0, 3, 0);
+
+        const vehicle = new CANNON.RaycastVehicle({
+            chassisBody: chassisBody,
+        });
+
+        // Tekerlek Ayarları
+        const wheelOptions = {
+            radius: 0.4,
+            directionLocal: new CANNON.Vec3(0, -1, 0),
+            suspensionStiffness: 30,
+            suspensionRestLength: 0.3,
+            frictionSlip: 1.4,
+            dampingRelaxation: 2.3,
+            dampingCompression: 4.4,
+            maxSuspensionForce: 100000,
+            rollInfluence: 0.01,
+            axleLocal: new CANNON.Vec3(1, 0, 0),
+            chassisConnectionPointLocal: new CANNON.Vec3(1, 1, 0),
+            maxSuspensionTravel: 0.3,
+            customSlidingRotationalSpeed: -30,
+            useCustomSlidingRotationalSpeed: true
+        };
+
+        // 4 Tekerleğin Pozisyonları
+        wheelOptions.chassisConnectionPointLocal.set(-1, -0.2, 1.2);
+        vehicle.addWheel(wheelOptions);
+        wheelOptions.chassisConnectionPointLocal.set(1, -0.2, 1.2);
+        vehicle.addWheel(wheelOptions);
+        wheelOptions.chassisConnectionPointLocal.set(-1, -0.2, -1.2);
+        vehicle.addWheel(wheelOptions);
+        wheelOptions.chassisConnectionPointLocal.set(1, -0.2, -1.2);
+        vehicle.addWheel(wheelOptions);
+
+        vehicle.addToWorld(world);
+
+        // 4. Modellerin Yüklenmesi
         const gltfLoader = new GLTFLoader();
-        
-        // Draco Adaptörü: Sıkıştırılmış .glb dosyalarını çözmek için gerekli
         const dracoLoader = new DRACOLoader();
         dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
         gltfLoader.setDRACOLoader(dracoLoader);
 
-        // 5. Model Yükleme İşlemleri
-        const loadingEnum = { count: 0 };
-        const checkLoading = () => {
-            loadingEnum.count++;
-            if (loadingEnum.count === 2) {
-                document.getElementById('loading').style.display = 'none';
-            }
-        };
+        let carMesh, roadMesh;
 
-        // Araba Modeli Yükleme (.glb)
-        let carMesh;
-        gltfLoader.load(
-            'assets/models/hot_wheels_unleashed.glb',
-            (gltf) => {
-                carMesh = gltf.scene;
-                
-                // Tinkercad / GLB modelleri için ölçek ve konum ayarı
-                carMesh.scale.set(0.1, 0.1, 0.1); 
-                carMesh.position.set(0, 0.5, 0);
-                
-                carMesh.traverse((child) => {
-                    if (child.isMesh) child.castShadow = true;
-                });
-
-                scene.add(carMesh);
-                checkLoading();
-            },
-            (xhr) => console.log(`Araba: ${(xhr.loaded / xhr.total * 100).toFixed(0)}%`),
-            (error) => console.error('Araba yüklenirken hata oluştu:', error)
-        );
-
-        // Yol Modeli Yükleme (.glb)
-        let roadMesh;
-        gltfLoader.load(
-            'assets/models/hwro_old_new_road.glb',
-            (gltf) => {
-                roadMesh = gltf.scene;
-                
-                roadMesh.position.set(0, 0, 0);
-                roadMesh.traverse((child) => {
-                    if (child.isMesh) child.receiveShadow = true;
-                });
-
-                scene.add(roadMesh);
-                checkLoading();
-            },
-            (xhr) => console.log(`Yol: ${(xhr.loaded / xhr.total * 100).toFixed(0)}%`),
-            (error) => console.error('Yol yüklenirken hata oluştu:', error)
-        );
-
-        // 6. Ekran Boyutu Değişimi Kontrolü
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+        // Araba Modeli
+        gltfLoader.load('assets/models/hot_wheels_unleashed.glb', (gltf) => {
+            carMesh = gltf.scene;
+            carMesh.scale.set(0.1, 0.1, 0.1);
+            scene.add(carMesh);
+            document.getElementById('loading').style.display = 'none';
         });
 
-        // 7. Animasyon Döngüsü (Render Loop)
-        function animate() {
-            requestAnimationFrame(animate);
-            controls.update();
-            renderer.render(scene, camera);
-        }
+        // Yol / Adaptör Modelleri
+        gltfLoader.load('assets/models/hwro_old_new_road.glb', (gltf) => {
+            roadMesh = gltf.scene;
+            scene.add(roadMesh);
+        });
 
-        animate();
-    </script>
-</body>
-</html>
+        gltfLoader.load('assets/models/hwro_old_adapter.glb', (gltf) => {
+            const adapterMesh = gltf.scene;
+            adapterMesh.position.set(0, 0, -10);
+            scene.add(adapterMesh);
+        });
+
+        // 5. Klavye Kontrolleri
+        const keys = { forward: false, backward: false, left: false, right: false, brake: false };
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'w' || e.key === 'ArrowUp') keys.forward = true;
+            if (e.key === 's' || e.key === 'ArrowDown') keys.backward = true;
+            if (e.key === 'a' || e.key === 'ArrowLeft') keys.left = true;
+            if (e.key === 'd' || e.key === 'ArrowRight') keys.right =

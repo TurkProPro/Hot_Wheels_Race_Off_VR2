@@ -3,20 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hot Wheels 3D - Fizik & Sürüş</title>
+    <title>Hot Wheels WebXR VR - Meta Quest 3</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; }
         #loading {
-            position: absolute; top: 50%; left: 50%;
-            transform: translate(-50%, -50%);
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             color: white; font-family: sans-serif; font-size: 24px; pointer-events: none;
         }
-        #controls-info {
-            position: absolute; top: 10px; left: 10px; color: white;
-            font-family: sans-serif; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 5px;
-        }
     </style>
-
     <script type="importmap">
         {
             "imports": {
@@ -28,136 +22,192 @@
     </script>
 </head>
 <body>
-    <div id="loading">Modeller ve Fizik Yükleniyor...</div>
-    <div id="controls-info">
-        <b>Kontroller:</b><br>
-        W / Yukarı Ok: Gaz<br>
-        S / Aşağı Ok: Fren / Geri<br>
-        A / D - Sol / Sağ Ok: Direksiyon<br>
-        Uzay (Space): El Freni
-    </div>
+    <div id="loading">WebXR Sahnesi Hazırlanıyor...</div>
 
     <script type="module">
         import * as THREE from 'three';
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
         import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
         import * as CANNON from 'cannon-es';
 
-        // 1. Three.js Görsel Sahne
+        // 1. Three.js Sahnesi ve WebXR Kurulumu
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x1a1a1a);
+        scene.background = new THREE.Color(0x101015);
 
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+        
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.shadowMap.enabled = true;
+        renderer.xr.enabled = true;
+        // WebXR Odaklı Zemin Ayarı: local-floor (Gerçek oda zeminine eşitler)
+        renderer.xr.setReferenceSpaceType('local-floor'); 
         document.body.appendChild(renderer.domElement);
+        document.body.appendChild(VRButton.createButton(renderer));
 
-        // Işıklar
-        const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
-        scene.add(ambientLight);
+        // Light
+        scene.add(new THREE.AmbientLight(0xffffff, 1.2));
         const dirLight = new THREE.DirectionalLight(0xffffff, 2);
-        dirLight.position.set(20, 40, 20);
-        dirLight.castShadow = true;
+        dirLight.position.set(5, 10, 5);
         scene.add(dirLight);
 
-        // 2. Cannon.es Fizik Dünyası
+        // 2. Cannon.es Fizik Motoru
         const world = new CANNON.World();
         world.gravity.set(0, -9.82, 0);
-        world.broadphase = new CANNON.SAPBroadphase(world);
 
-        // Zemin Malzemesi & Sürtünme Ayarları
-        const groundMaterial = new CANNON.Material('ground');
-        const wheelMaterial = new CANNON.Material('wheel');
-        const wheelGroundContactMaterial = new CANNON.ContactMaterial(wheelMaterial, groundMaterial, {
-            friction: 0.8,
-            restitution: 0.1,
-            contactEquationStiffness: 1e8
-        });
-        world.addContactMaterial(wheelGroundContactMaterial);
-
-        // Fiziksel Zemin (Düz Pist Alanı)
-        const groundBody = new CANNON.Body({
-            type: CANNON.Body.STATIC,
-            shape: new CANNON.Plane(),
-            material: groundMaterial
-        });
+        const groundMaterial = new CANNON.Material();
+        const groundBody = new CANNON.Body({ type: CANNON.Body.STATIC, shape: new CANNON.Plane(), material: groundMaterial });
         groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
         world.addBody(groundBody);
 
-        // 3. Araç Fiziği (RaycastVehicle)
-        const chassisShape = new CANNON.Box(new CANNON.Vec3(1, 0.4, 2));
-        const chassisBody = new CANNON.Body({ mass: 150 });
+        // Araba Fizik Gövdesi
+        const chassisShape = new CANNON.Box(new CANNON.Vec3(0.15, 0.05, 0.3));
+        const chassisBody = new CANNON.Body({ mass: 5 });
         chassisBody.addShape(chassisShape);
-        chassisBody.position.set(0, 3, 0);
+        chassisBody.position.set(0, 0.5, -1); // Oyuncunun önüne yerleştir
+        world.addBody(chassisBody);
 
-        const vehicle = new CANNON.RaycastVehicle({
-            chassisBody: chassisBody,
-        });
-
-        // Tekerlek Ayarları
+        const vehicle = new CANNON.RaycastVehicle({ chassisBody: chassisBody });
         const wheelOptions = {
-            radius: 0.4,
-            directionLocal: new CANNON.Vec3(0, -1, 0),
-            suspensionStiffness: 30,
-            suspensionRestLength: 0.3,
-            frictionSlip: 1.4,
-            dampingRelaxation: 2.3,
-            dampingCompression: 4.4,
-            maxSuspensionForce: 100000,
-            rollInfluence: 0.01,
-            axleLocal: new CANNON.Vec3(1, 0, 0),
-            chassisConnectionPointLocal: new CANNON.Vec3(1, 1, 0),
-            maxSuspensionTravel: 0.3,
-            customSlidingRotationalSpeed: -30,
-            useCustomSlidingRotationalSpeed: true
+            radius: 0.05, directionLocal: new CANNON.Vec3(0, -1, 0),
+            suspensionStiffness: 30, suspensionRestLength: 0.1,
+            axleLocal: new CANNON.Vec3(1, 0, 0), chassisConnectionPointLocal: new CANNON.Vec3(0, 0, 0)
         };
-
-        // 4 Tekerleğin Pozisyonları
-        wheelOptions.chassisConnectionPointLocal.set(-1, -0.2, 1.2);
-        vehicle.addWheel(wheelOptions);
-        wheelOptions.chassisConnectionPointLocal.set(1, -0.2, 1.2);
-        vehicle.addWheel(wheelOptions);
-        wheelOptions.chassisConnectionPointLocal.set(-1, -0.2, -1.2);
-        vehicle.addWheel(wheelOptions);
-        wheelOptions.chassisConnectionPointLocal.set(1, -0.2, -1.2);
-        vehicle.addWheel(wheelOptions);
-
+        // 4 Tekerlek
+        wheelOptions.chassisConnectionPointLocal.set(-0.1, -0.02, 0.15); vehicle.addWheel(wheelOptions);
+        wheelOptions.chassisConnectionPointLocal.set(0.1, -0.02, 0.15); vehicle.addWheel(wheelOptions);
+        wheelOptions.chassisConnectionPointLocal.set(-0.1, -0.02, -0.15); vehicle.addWheel(wheelOptions);
+        wheelOptions.chassisConnectionPointLocal.set(0.1, -0.02, -0.15); vehicle.addWheel(wheelOptions);
         vehicle.addToWorld(world);
 
-        // 4. Modellerin Yüklenmesi
+        // 3. 3D Model Yüklemeleri (.glb)
         const gltfLoader = new GLTFLoader();
         const dracoLoader = new DRACOLoader();
         dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
         gltfLoader.setDRACOLoader(dracoLoader);
 
-        let carMesh, roadMesh;
-
-        // Araba Modeli
+        let carMesh;
         gltfLoader.load('assets/models/hot_wheels_unleashed.glb', (gltf) => {
             carMesh = gltf.scene;
-            carMesh.scale.set(0.1, 0.1, 0.1);
+            carMesh.scale.set(0.05, 0.05, 0.05);
             scene.add(carMesh);
             document.getElementById('loading').style.display = 'none';
         });
 
-        // Yol / Adaptör Modelleri
         gltfLoader.load('assets/models/hwro_old_new_road.glb', (gltf) => {
-            roadMesh = gltf.scene;
-            scene.add(roadMesh);
+            scene.add(gltf.scene);
         });
 
-        gltfLoader.load('assets/models/hwro_old_adapter.glb', (gltf) => {
-            const adapterMesh = gltf.scene;
-            adapterMesh.position.set(0, 0, -10);
-            scene.add(adapterMesh);
+        // 4. Quest 3 VR Kontrolcüleri (Controllers)
+        const controller1 = renderer.xr.getController(0);
+        const controller2 = renderer.xr.getController(1);
+        scene.add(controller1);
+        scene.add(controller2);
+
+        // Kumanda Görselleri
+        const controllerGrip1 = renderer.xr.getControllerGrip(0);
+        const controllerGrip2 = renderer.xr.getControllerGrip(1);
+        scene.add(controllerGrip1);
+        scene.add(controllerGrip2);
+
+        // Arabayı Elde Tutma Değişkenleri
+        let grabbedBy = null; // Hangi kumandanın tuttuğu (controller1 / controller2)
+        const previousControllerPos = new THREE.Vector3();
+        const controllerVelocity = new THREE.Vector3();
+
+        // 5. VR Kontrol & Tutma/Atma Mantığı
+        function processVRInputs() {
+            const session = renderer.xr.getSession();
+            if (!session) return;
+
+            for (const source of session.inputSources) {
+                if (!source.gamepad) continue;
+
+                const gamepad = source.gamepad;
+                const hand = source.handedness; // 'left' veya 'right'
+                const controller = hand === 'left' ? controller1 : controller2;
+                
+                // Tuşlar (Quest 3 Eşleşmesi)
+                const triggerPressed = gamepad.buttons[0]?.pressed; // Index Trigger
+                const gripPressed = gamepad.buttons[1]?.pressed;    // Hand Grip
+                const axes = gamepad.axes; // Joystick (axes[2]: Sol/Sağ, axes[3]: Yukarı/Aşağı)
+
+                // A) SÜRÜŞ KONTROLLERİ
+                if (hand === 'right') {
+                    // Sağ Trigger = İleri Gaz
+                    const engineForce = triggerPressed ? -50 : 0;
+                    vehicle.applyEngineForce(engineForce, 2);
+                    vehicle.applyEngineForce(engineForce, 3);
+
+                    // Sağ Grip = Geri
+                    const reverseForce = gripPressed ? 30 : 0;
+                    if (reverseForce > 0) {
+                        vehicle.applyEngineForce(reverseForce, 2);
+                        vehicle.applyEngineForce(reverseForce, 3);
+                    }
+                }
+
+                if (hand === 'left') {
+                    // Sol Joystick = Sağ / Sol Direksiyon
+                    const steerVal = -axes[2] * 0.5; // X ekseni
+                    vehicle.setSteeringValue(steerVal, 0);
+                    vehicle.setSteeringValue(steerVal, 1);
+                }
+
+                // B) ARABAYI 8 CM MESAFEDEN TUTMA VE ATMA
+                const controllerPos = new THREE.Vector3();
+                controller.getWorldPosition(controllerPos);
+
+                const carPos = new THREE.Vector3(chassisBody.position.x, chassisBody.position.y, chassisBody.position.z);
+                const distance = controllerPos.distanceTo(carPos);
+
+                // 8 cm = 0.08 metre
+                if (distance <= 0.08 && triggerPressed && !grabbedBy) {
+                    grabbedBy = controller;
+                    chassisBody.type = CANNON.Body.KINEMATIC; // Fizik kütlesini dondur
+                }
+
+                // Elden Bırakma / Fırlatma
+                if (grabbedBy === controller && !triggerPressed) {
+                    grabbedBy = null;
+                    chassisBody.type = CANNON.Body.DYNAMIC; // Fiziği tekrar aç
+                    
+                    // Fırlatma Hızı Kazandır
+                    chassisBody.velocity.copy(new CANNON.Vec3(
+                        controllerVelocity.x * 5,
+                        controllerVelocity.y * 5,
+                        controllerVelocity.z * 5
+                    ));
+                }
+
+                // Eğer araba elde tutuluyorsa konumunu kumandaya sabitle
+                if (grabbedBy === controller) {
+                    // Kumanda hızını hesapla (Fırlatma için)
+                    controllerVelocity.subVectors(controllerPos, previousControllerPos);
+                    previousControllerPos.copy(controllerPos);
+
+                    chassisBody.position.copy(controllerPos);
+                    chassisBody.quaternion.copy(controller.quaternion);
+                }
+            }
+        }
+
+        // 6. Döngü (Render Loop)
+        renderer.setAnimationLoop(() => {
+            world.fixedStep();
+            processVRInputs();
+
+            // Fizik gövdesi ile 3D Görseli Eşitle
+            if (carMesh && grabbedBy === null) {
+                carMesh.position.copy(chassisBody.position);
+                carMesh.quaternion.copy(chassisBody.quaternion);
+            } else if (carMesh && grabbedBy) {
+                carMesh.position.copy(chassisBody.position);
+                carMesh.quaternion.copy(chassisBody.quaternion);
+            }
+
+            renderer.render(scene, camera);
         });
-
-        // 5. Klavye Kontrolleri
-        const keys = { forward: false, backward: false, left: false, right: false, brake: false };
-
-        window.addEventListener('keydown', (e) => {
-            if (e.key === 'w' || e.key === 'ArrowUp') keys.forward = true;
-            if (e.key === 's' || e.key === 'ArrowDown') keys.backward = true;
-            if (e.key === 'a' || e.key === 'ArrowLeft') keys.left = true;
-            if (e.key === 'd' || e.key === 'ArrowRight') keys.right =
+    </script>
+</body>
+</html>

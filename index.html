@@ -1,90 +1,62 @@
 <!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Hot Wheels VR v3.1 - Fixed Paths</title>
-<style>body{margin:0;overflow:hidden;background:#000} #info{position:absolute;color:white;top:10px;width:100%;text-align:center;font-family:sans-serif;z-index:10}</style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>VR Hot Wheels - Beyazlık Fix + Speed Snap</title>
+<style>
+  body { margin: 0; overflow: hidden; background: #000; }
+  #info { position: absolute; top: 10px; width: 100%; text-align: center; color: white; font-family: sans-serif; z-index: 10; }
+</style>
+<script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
 <script type="importmap">
 {
-    "imports": {
-        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-        "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
-    }
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+    "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+  }
 }
 </script>
 </head>
 <body>
-<div id="info">X=Yol Y=Adaptör A=Işınla/Kilitle B=Dummy</div>
+<div id="info">WASD: Hareket | X: Yol Spawn | Y: Araba Spawn | A/B: Adaptör | L/R Trigger: Tut</div>
+
 <script type="module">
 import * as THREE from 'three';
-import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as CANNON from 'cannon-es';
 
+// --- SAHNE KURULUMU ---
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1a1a24);
-const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.set(0, 1.6, 0);
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+scene.background = new THREE.Color(0x87CEEB);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 1000);
+camera.position.set(0, 1.6, 2);
+
+const renderer = new THREE.WebGLRenderer({antialias: true});
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
-renderer.xr.setReferenceSpaceType('local-floor');
+renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
-document.body.appendChild(VRButton.createButton(renderer));
-scene.add(new THREE.HemisphereLight(0xffffff, 0x444, 1.5));
 
-const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) });
-world.addBody(new CANNON.Body({ type: CANNON.Body.STATIC, shape: new CANNON.Plane(), quaternion: new CANNON.Quaternion().setFromEuler(-Math.PI / 2, 0, 0) }));
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 0);
 
-let playerCar, playerVehicle, dummyCars = [], tracks = [], adapters = [];
-let carModelTemplate = null, trackModelTemplate = null;
-let lastButtons = { x: false, y: false, a: false, b: false };
+// IŞIK
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444, 1.2));
+const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+dirLight.position.set(5,10,5);
+dirLight.castShadow = true;
+scene.add(dirLight);
 
-const loader = new GLTFLoader();
-const BASE_URL = 'https://raw.githubusercontent.com/TurkPro/Hot_Wheels_Race_Off_VR2/main/';
+// ZEMİN
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(20,20), new THREE.MeshStandardMaterial({color:0x555555}));
+ground.rotation.x = -Math.PI/2; ground.receiveShadow = true;
+scene.add(ground);
 
-// --- DOĞRU PATHLER ---
-// Araba: assets/models/ içinde "unleashed" geçen dosya
-loader.load(BASE_URL + 'assets/models/unleashed_car.glb', (gltf) => {
-    carModelTemplate = gltf.scene;
-    spawnPlayerCar();
-}, undefined, (e)=>{ console.error("Araba yüklenemedi", e) });
-
-// Yol: assets/models/old_new_road.glb
-loader.load(BASE_URL + 'assets/models/old_new_road.glb', (gltf) => {
-    trackModelTemplate = gltf.scene;
-}, undefined, (e)=>{ console.error("Yol yüklenemedi", e) });
-
-function spawnPlayerCar(){
-    if(!carModelTemplate) return;
-    playerCar = carModelTemplate.clone();
-    playerCar.scale.set(0.05, 0.05, 0.05);
-    scene.add(playerCar);
-    const chassisBody = new CANNON.Body({ mass: 5, shape: new CANNON.Box(new CANNON.Vec3(0.15, 0.05, 0.3)) });
-    chassisBody.position.set(0, 0.5, -1);
-    world.addBody(chassisBody);
-    playerVehicle = new CANNON.RaycastVehicle({ chassisBody });
-    [[-0.15,0.25],[0.15,0.25],[-0.15,-0.25],[0.15,-0.25]].forEach((p)=>{
-        playerVehicle.addWheel({radius:0.05, directionLocal:new CANNON.Vec3(0,-1,0), chassisConnectionPointLocal:new CANNON.Vec3(p[0],-0.02,p[1])});
-    });
-    playerVehicle.addToWorld(world);
-}
-
-function spawnDummyCar(){
-    if(!carModelTemplate) return;
-    const mesh = carModelTemplate.clone(); mesh.scale.set(0.05,0.05,0.05); scene.add(mesh);
-    const body = new CANNON.Body({ mass: 3, shape: new CANNON.Box(new CANNON.Vec3(0.15, 0.05, 0.3)) });
-    const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
-    body.position.copy(camera.position.clone().add(dir.multiplyScalar(0.5)));
-    world.addBody(body);
-    dummyCars.push({mesh, body, speed: 2 + Math.random()*2});
-}
-
-function spawnTrack(pos){
-    const mesh = trackModelTemplate? trackModelTemplate.clone() : new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.01, 0.4), new THREE.MeshStandardMaterial({color:0xff5500}));
-    mesh.scale.set(0.1,0.1,0.1); mesh.position.copy(pos); scene.add(mesh);
-    const body = new CANNON.Body({ mass: 1, shape: new CANNON.Box(new CANNON.Vec3(0.04, 0.005, 0.2)) });
-    body.position.copy(pos); world.addBody(body);
-    const newTrack = {mesh, body, grabbedBy: [], isLocked: false};
-    tracks.push(newTrack
+// FİZİK DÜNYASI
+const world = new CANNON.World({ gravity: new CANNON.Vec3(0,-9.82,0) });
+const groundBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
+groundBody.quaternion.setFromEuler

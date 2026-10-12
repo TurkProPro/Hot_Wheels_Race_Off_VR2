@@ -68,8 +68,8 @@
   var physicsHitboxes = [];
 
   // Driving Variables
-  var maxEngineForce = 15;   // Düzeltildi: Devasa güç yerine kontrollü güç
-  var maxBrakeForce = 5;     // Düzeltildi: Yumuşak fren
+  var maxEngineForce = 15;
+  var maxBrakeForce = 5;
   var currentEngineForce = 0;
   var currentBrakingForce = 0;
   var currentSteering = 0;
@@ -163,7 +163,8 @@
 
   var loader = new THREE.GLTFLoader();
 
-  loader.load('./assets/models/hot_wheels_unleashed.glb', function(gltf) {
+  // DÜZELTİLDİ: GitHub Pages uyumlu kesin yol (./ kaldırıldı)
+  loader.load('assets/models/hot_wheels_unleashed.glb', function(gltf) {
     loadedReverbModel = gltf.scene;
 
     var bboxInitial = new THREE.Box3().setFromObject(loadedReverbModel);
@@ -173,9 +174,6 @@
 
     var wrapperGroup = new THREE.Group();
     wrapperGroup.add(loadedReverbModel);
-    
-    // DÜZELTME 1: Ekstra 90 derece rotasyon kaldırıldı. 
-    // Modelin kendi orijinal ekseni fizik motorunun ileri yönüyle (Z ekseni) birebir hizalandı.
     loadedReverbModel.rotation.y = 0; 
 
     var bboxScaled = new THREE.Box3().setFromObject(wrapperGroup);
@@ -258,8 +256,6 @@
 
     // CAR CHASSIS
     var chassisShape = new CANNON.Box(new CANNON.Vec3(0.02, 0.008, 0.04));
-    
-    // DÜZELTME 2: 150 kg devasa kütle, aracın boyutuna uygun stabil bir ağırlık olan 2.0 kg'a düşürüldü.
     chassisBody = new CANNON.Body({ mass: 2.0, material: defaultMaterial });
     chassisBody.addShape(chassisShape);
     chassisBody.position.set(0, 0.1, -0.4);
@@ -631,9 +627,8 @@
     scene.add(boxMesh);
     hitboxVisuals.push(boxMesh);
 
-    // CANNON.ES PHYSICS BOX
     var boxShape = new CANNON.Box(new CANNON.Vec3(sizeX / 2, sizeY / 2, sizeZ / 2));
-    var boxBody = new CANNON.Body({ mass: 0 }); // Mass 0 = Static Collider
+    var boxBody = new CANNON.Body({ mass: 0 }); 
     boxBody.addShape(boxShape);
     boxBody.position.copy(previewBoxMesh.position);
     world.addBody(boxBody);
@@ -730,7 +725,6 @@
     if (delta > 0.1) delta = 0.1;
     lastTime = time;
 
-    // STEP PHYSICS WORLD
     if (world) {
       world.step(1 / 60, delta, 3);
     }
@@ -1032,7 +1026,6 @@
       }
     }
 
-    // VEHICLE ENGINE & STEERING CALCULATION
     if (!isMenuOpen && vehicle) {
       if (isThrottlePressed) {
         currentEngineForce = -maxEngineForce;

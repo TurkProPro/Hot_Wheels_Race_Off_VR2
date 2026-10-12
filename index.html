@@ -1,62 +1,331 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="tr">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>VR Hot Wheels - Beyazlık Fix + Speed Snap</title>
-<style>
-  body { margin: 0; overflow: hidden; background: #000; }
-  #info { position: absolute; top: 10px; width: 100%; text-align: center; color: white; font-family: sans-serif; z-index: 10; }
-</style>
-<script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-    "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
-  }
-}
-</script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hot Wheels VR - Snap, Track & Physics System</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
+        #loading {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: white; font-size: 18px; text-align: center; pointer-events: none;
+            background: rgba(0,0,0,0.85); padding: 20px; border-radius: 10px; z-index: 999;
+        }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+            }
+        }
+    </script>
 </head>
 <body>
-<div id="info">WASD: Hareket | X: Yol Spawn | Y: Araba Spawn | A/B: Adaptör | L/R Trigger: Tut</div>
+    <div id="loading">Hot Wheels VR Dünyası Hazırlanıyor...</div>
 
-<script type="module">
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import * as CANNON from 'cannon-es';
+    <script type="module">
+        import * as THREE from 'three';
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
+        import * as CANNON from 'cannon-es';
 
-// --- SAHNE KURULUMU ---
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87CEEB);
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 1000);
-camera.position.set(0, 1.6, 2);
+        const loadingDiv = document.getElementById('loading');
 
-const renderer = new THREE.WebGLRenderer({antialias: true});
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.xr.enabled = true;
-renderer.shadowMap.enabled = true;
-document.body.appendChild(renderer.domElement);
+        // 1. Sahne ve Renderer Kurulumu
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a24);
 
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 0, 0);
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 1.6, 0);
 
-// IŞIK
-scene.add(new THREE.HemisphereLight(0xffffff, 0x444, 1.2));
-const dirLight = new THREE.DirectionalLight(0xffffff, 1);
-dirLight.position.set(5,10,5);
-dirLight.castShadow = true;
-scene.add(dirLight);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.xr.enabled = true;
+        renderer.xr.setReferenceSpaceType('local-floor');
+        document.body.appendChild(renderer.domElement);
+        document.body.appendChild(VRButton.createButton(renderer));
 
-// ZEMİN
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(20,20), new THREE.MeshStandardMaterial({color:0x555555}));
-ground.rotation.x = -Math.PI/2; ground.receiveShadow = true;
-scene.add(ground);
+        scene.add(new THREE.AmbientLight(0xffffff, 1.5));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 2);
+        dirLight.position.set(5, 10, 5);
+        scene.add(dirLight);
 
-// FİZİK DÜNYASI
-const world = new CANNON.World({ gravity: new CANNON.Vec3(0,-9.82,0) });
-const groundBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
-groundBody.quaternion.setFromEuler
+        // 2. Fizik Dünyası (Cannon.js)
+        const world = new CANNON.World();
+        world.gravity.set(0, -9.82, 0);
+
+        const groundBody = new CANNON.Body({ type: CANNON.Body.STATIC, shape: new CANNON.Plane() });
+        groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+        world.addBody(groundBody);
+
+        // Koleksiyonlar
+        let dummyCars = [];
+        let tracks = [];
+        let adapters = [];
+
+        // --- ANA ARABA (Sadece bu kontrol edilebilir) ---
+        function createCarMesh() {
+            const group = new THREE.Group();
+            const body = new THREE.Mesh(
+                new THREE.BoxGeometry(0.3, 0.1, 0.6),
+                new THREE.MeshStandardMaterial({ color: 0xff2222, metalness: 0.4, roughness: 0.3 })
+            );
+            body.position.y = 0.05;
+            group.add(body);
+            return group;
+        }
+
+        const playerCarMesh = createCarMesh();
+        scene.add(playerCarMesh);
+
+        const playerChassisBody = new CANNON.Body({ mass: 5 });
+        playerChassisBody.addShape(new CANNON.Box(new CANNON.Vec3(0.15, 0.05, 0.3)));
+        playerChassisBody.position.set(0, 0.5, -1);
+        world.addBody(playerChassisBody);
+
+        const playerVehicle = new CANNON.RaycastVehicle({ chassisBody: playerChassisBody });
+        const wheelOpts = {
+            radius: 0.05, directionLocal: new CANNON.Vec3(0, -1, 0),
+            suspensionStiffness: 30, suspensionRestLength: 0.1, axleLocal: new CANNON.Vec3(1, 0, 0),
+            chassisConnectionPointLocal: new CANNON.Vec3(0, 0, 0)
+        };
+        wheelOpts.chassisConnectionPointLocal.set(-0.1, -0.02, 0.15); playerVehicle.addWheel(wheelOpts);
+        wheelOpts.chassisConnectionPointLocal.set(0.1, -0.02, 0.15); playerVehicle.addWheel(wheelOpts);
+        wheelOpts.chassisConnectionPointLocal.set(-0.1, -0.02, -0.15); playerVehicle.addWheel(wheelOpts);
+        wheelOpts.chassisConnectionPointLocal.set(0.1, -0.02, -0.15); playerVehicle.addWheel(wheelOpts);
+        playerVehicle.addToWorld(world);
+
+        loadingDiv.style.display = 'none';
+
+        // --- SPAWN FONKSİYONLARI ---
+        function spawnDummyCar() {
+            const mesh = createCarMesh();
+            // Dummy araçları farklı renk yapalım ki ayırt edilsin
+            mesh.children[0].material.color.setHex(0x3366ff);
+            scene.add(mesh);
+
+            const body = new CANNON.Body({ mass: 3 });
+            body.addShape(new CANNON.Box(new CANNON.Vec3(0.15, 0.05, 0.3)));
+            
+            const dir = new THREE.Vector3();
+            camera.getWorldDirection(dir);
+            const pos = camera.position.clone().add(dir.multiplyScalar(0.6));
+            body.position.set(pos.x, pos.y, pos.z);
+            world.addBody(body);
+
+            dummyCars.push({ mesh, body });
+        }
+
+        function spawnTrack(pos) {
+            const mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(0.1, 0.01, 0.5),
+                new THREE.MeshStandardMaterial({ color: 0xff6600, roughness: 0.2 })
+            );
+            mesh.position.copy(pos);
+            scene.add(mesh);
+
+            const body = new CANNON.Body({ mass: 1 });
+            body.addShape(new CANNON.Box(new CANNON.Vec3(0.05, 0.005, 0.25)));
+            body.position.copy(pos);
+            world.addBody(body);
+
+            const trackObj = { mesh, body, grabbedBy: [], isLocked: false };
+            tracks.push(trackObj);
+            return trackObj;
+        }
+
+        function spawnAdapter(pos) {
+            const mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(0.04, 0.008, 0.08),
+                new THREE.MeshStandardMaterial({ color: 0x00ffff })
+            );
+            mesh.position.copy(pos);
+            scene.add(mesh);
+
+            const body = new CANNON.Body({ mass: 0.2 });
+            body.addShape(new CANNON.Box(new CANNON.Vec3(0.02, 0.004, 0.04)));
+            body.position.copy(pos);
+            world.addBody(body);
+
+            const adaptObj = { mesh, body, grabbedBy: null, snappedTo: null };
+            adapters.push(adaptObj);
+            return adaptObj;
+        }
+
+        // --- VR KONTROLCÜLERİ VE ETKİLEŞİM ---
+        const controller1 = renderer.xr.getController(0);
+        const controller2 = renderer.xr.getController(1);
+        scene.add(controller1); scene.add(controller2);
+
+        let lastButtons = { x: false, y: false, a: false, b: false };
+
+        function processVRInputs() {
+            const session = renderer.xr.getSession();
+            if (!session) return;
+
+            const posL = new THREE.Vector3();
+            const posR = new THREE.Vector3();
+            controller1.getWorldPosition(posL);
+            controller2.getWorldPosition(posR);
+
+            for (const source of session.inputSources) {
+                if (!source.gamepad) continue;
+                const gp = source.gamepad;
+                const hand = source.handedness;
+                const ctrlPos = hand === 'left' ? posL : posR;
+                const ctrl = hand === 'left' ? controller1 : controller2;
+
+                const trigger = gp.buttons[0]?.pressed;
+                const grip = gp.buttons[1]?.pressed;
+                const btnA_X = gp.buttons[4]?.pressed;
+                const btnB_Y = gp.buttons[5]?.pressed;
+
+                // SOL EL: X -> Yol, Y -> Adaptör, Direksiyon
+                if (hand === 'left') {
+                    if (btnA_X && !lastButtons.x) spawnTrack(ctrlPos);
+                    lastButtons.x = btnA_X;
+
+                    if (btnB_Y && !lastButtons.y) spawnAdapter(ctrlPos);
+                    lastButtons.y = btnB_Y;
+
+                    const steerAxis = gp.axes[2] !== undefined ? gp.axes[2] : (gp.axes[0] !== undefined ? gp.axes[0] : 0);
+                    playerVehicle.setSteeringValue(-steerAxis * 0.5, 0);
+                    playerVehicle.setSteeringValue(-steerAxis * 0.5, 1);
+                }
+
+                // SAĞ EL: A -> Işınlama / Kilitleme, B -> Dummy Araba, Gaz/Fren
+                if (hand === 'right') {
+                    if (btnA_X && !lastButtons.a) {
+                        // Eğer yol iki elle tutuluyorsa yolları sabitle (Anchor/Lock)
+                        let lockedAny = false;
+                        tracks.forEach(t => {
+                            if (t.grabbedBy.length > 0) {
+                                t.isLocked = true;
+                                t.body.type = CANNON.Body.STATIC;
+                                lockedAny = true;
+                            }
+                        });
+
+                        // Yol tutulmuyorsa ana aracı 15cm öne ışınla
+                        if (!lockedAny) {
+                            const camDir = new THREE.Vector3();
+                            camera.getWorldDirection(camDir);
+                            const targetPos = camera.position.clone().add(camDir.multiplyScalar(0.15));
+                            playerChassisBody.position.set(targetPos.x, targetPos.y, targetPos.z);
+                            playerChassisBody.velocity.set(0, 0, 0);
+                            playerChassisBody.angularVelocity.set(0, 0, 0);
+                        }
+                    }
+                    lastButtons.a = btnA_X;
+
+                    if (btnB_Y && !lastButtons.b) spawnDummyCar();
+                    lastButtons.b = btnB_Y;
+
+                    const engineForce = trigger ? -60 : (grip ? 30 : 0);
+                    playerVehicle.applyEngineForce(engineForce, 2);
+                    playerVehicle.applyEngineForce(engineForce, 3);
+                }
+
+                // --- YOL TUTMA VE İKİ EL TEĞET BÜKME MANTIĞI ---
+                tracks.forEach(t => {
+                    const tPos = new THREE.Vector3(t.body.position.x, t.body.position.y, t.body.position.z);
+                    
+                    if (ctrlPos.distanceTo(tPos) < 0.25 && grip) {
+                        if (!t.grabbedBy.includes(ctrl)) t.grabbedBy.push(ctrl);
+                        t.isLocked = false;
+                        t.body.type = CANNON.Body.KINEMATIC;
+                    } else if (!grip) {
+                        t.grabbedBy = t.grabbedBy.filter(c => c !== ctrl);
+                        if (t.grabbedBy.length === 0 && !t.isLocked) {
+                            t.body.type = CANNON.Body.DYNAMIC;
+                        }
+                    }
+
+                    // İki el ile tutuluyorsa: İki elin ortası + teğet/paralel rotasyon
+                    if (t.grabbedBy.length === 2) {
+                        const midPoint = new THREE.Vector3().addVectors(posL, posR).multiplyScalar(0.5);
+                        t.body.position.copy(midPoint);
+
+                        const rotMatrix = new THREE.Matrix4();
+                        rotMatrix.lookAt(posL, posR, THREE.Object3D.DEFAULT_UP);
+                        t.body.quaternion.setFromRotationMatrix(rotMatrix);
+                    } else if (t.grabbedBy.length === 1 && t.grabbedBy[0] === ctrl) {
+                        t.body.position.copy(ctrlPos);
+                        t.body.quaternion.copy(ctrl.quaternion);
+                    }
+                });
+
+                // --- ADAPTÖR VE YOL SNAP (YAPIŞMA) MANTIĞI (8 cm / 0.08m) ---
+                adapters.forEach(a => {
+                    const aPos = new THREE.Vector3(a.body.position.x, a.body.position.y, a.body.position.z);
+
+                    if (ctrlPos.distanceTo(aPos) < 0.15 && grip) {
+                        a.grabbedBy = ctrl;
+                        a.body.type = CANNON.Body.KINEMATIC;
+                        a.snappedTo = null;
+                    } else if (!grip && a.grabbedBy === ctrl) {
+                        a.grabbedBy = null;
+                        
+                        let closestTrack = null;
+                        let minDist = 0.08; // 8 cm yakınlık şartı
+
+                        tracks.forEach(t => {
+                            const tPos = new THREE.Vector3(t.body.position.x, t.body.position.y, t.body.position.z);
+                            const dist = aPos.distanceTo(tPos);
+                            if (dist < minDist) {
+                                minDist = dist;
+                                closestTrack = t;
+                            }
+                        });
+
+                        if (closestTrack) {
+                            a.snappedTo = closestTrack;
+                            a.body.type = CANNON.Body.STATIC;
+                            a.body.position.copy(closestTrack.body.position);
+                            a.body.quaternion.copy(closestTrack.body.quaternion);
+                        } else {
+                            a.body.type = CANNON.Body.DYNAMIC;
+                        }
+                    }
+
+                    if (a.grabbedBy === ctrl) {
+                        a.body.position.copy(ctrlPos);
+                        a.body.quaternion.copy(ctrl.quaternion);
+                    }
+                });
+            }
+        }
+
+        // 3. Ana Animasyon Döngüsü
+        renderer.setAnimationLoop(() => {
+            world.fixedStep();
+            processVRInputs();
+
+            // Ana araba senkronu
+            playerCarMesh.position.copy(playerChassisBody.position);
+            playerCarMesh.quaternion.copy(playerChassisBody.quaternion);
+
+            // Dummy arabalar senkronu
+            dummyCars.forEach(d => {
+                d.mesh.position.copy(d.body.position);
+                d.mesh.quaternion.copy(d.body.quaternion);
+            });
+
+            // Yollar senkronu
+            tracks.forEach(t => {
+                t.mesh.position.copy(t.body.position);
+                t.mesh.quaternion.copy(t.body.quaternion);
+            });
+
+            // Adaptörler senkronu
+            adapters.forEach(a => {
+                a.mesh.position.copy(a.body.position);
+                a.mesh.quaternion.copy(a.body.quaternion);
+            });
+
+            renderer.render(scene, camera);
+        });
+    </script>
+</body>
+</html>

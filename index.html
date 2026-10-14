@@ -1,1 +1,279 @@
-.
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hot Wheels Race Off VR - 1:64 Ölçek</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
+        #info-overlay {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            color: white; background: rgba(0,0,0,0.7); padding: 10px 20px;
+            border-radius: 8px; font-size: 14px; pointer-events: none; text-align: center;
+            z-index: 10;
+        }
+    </style>
+
+    <!-- Three.js ve XR/Physics Kütüphaneleri -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/webxr/VRButton.js"></script>
+</head>
+<body>
+    <div id="info-overlay">Meta Quest 3 - 1:64 Hot Wheels RC (Sağ Trigger: İleri, Sağ Grip: Geri, Sol Joystick: Yön, Menü Tuşu: Pist Seçimi)</div>
+
+    <script>
+        let camera, scene, renderer;
+        let world, carBody, carMesh;
+        let controllers = [];
+        let physicsEnabled = true;
+        
+        // Kontrol Değişkenleri
+        let throttle = 0; 
+        let steering = 0;  
+
+        // Pistler ve Modeller
+        const tracks = [
+            { name: "Ana Yol (Road)", file: "models/assets/hwrovr_old_new_road.glb" },
+            { name: "Adaptör Parkuru", file: "models/assets/hwrovr_old_adapter.glb" }
+        ];
+        let currentTrackMesh = null;
+        let currentTrackBody = null;
+
+        // UI / Menü Elemanları
+        let menuMesh, menuTexture, menuCtx;
+        let menuVisible = false;
+        let selectedTrackIndex = 0;
+
+        init();
+        animate();
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111122);
+
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 50);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            document.body.appendChild(VRButton.createButton(renderer));
+
+            // Işıklandırma
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
+            directionalLight.position.set(2, 5, 2);
+            scene.add(directionalLight);
+
+            // Fizik Motoru Kurulumu (Cannon.js)
+            world = new CANNON.World();
+            world.gravity.set(0, -9.82, 0);
+            world.broadphase = new CANNON.NaiveBroadphase();
+            world.solver.iterations = 10;
+
+            // Yedek Düz Zemin (LocalFloor)
+            const groundShape = new CANNON.Plane();
+            const groundBody = new CANNON.Body({ mass: 0 });
+            groundBody.addShape(groundShape);
+            groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+            world.add(groundBody);
+
+            const gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
+            gridHelper.position.y = 0.001;
+            scene.add(gridHelper);
+
+            // 1:64 Gerçekçi Hot Wheels Araba Oluşturma
+            createHotWheelsCar();
+
+            setupControllers();
+            createVRMenu();
+            loadTrack(selectedTrackIndex);
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function createHotWheelsCar() {
+            // Gerçek 1:64 Araba Boyutları (~7cm uzunluk, ~3cm genişlik, ~2cm yükseklik)
+            const carShape = new CANNON.Box(new CANNON.Vec3(0.015, 0.01, 0.035));
+            carBody = new CANNON.Body({ mass: 0.05 }); // Hafif RC araba kütlesi (50 gram)
+            carBody.addShape(carShape);
+            carBody.position.set(0, 0.05, -0.5); // LocalFloor üzerinde spawn
+            world.add(carBody);
+
+            // Geçici Kutu Görseli
+            const carGeometry = new THREE.BoxGeometry(0.03, 0.02, 0.07);
+            const carMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000, roughness: 0.2 });
+            carMesh = new THREE.Mesh(carGeometry, carMaterial);
+            scene.add(carMesh);
+
+            // Gerçek 1:64 Model Yükleme (hot_wheels_unleashed.glb)
+            const loader = new THREE.GLTFLoader();
+            loader.load('models/assets/hot_wheels_unleashed.glb', function(gltf) {
+                scene.remove(carMesh);
+                carMesh = gltf.scene;
+                // Modelin kendi orijinal boyutunu 1:64 oranına ölçeklendiriyoruz
+                carMesh.scale.set(0.02, 0.02, 0.02); 
+                scene.add(carMesh);
+            }, undefined, function(error) {
+                console.log("Araba modeli yüklenemedi, temel geometri kullanılıyor.", error);
+            });
+        }
+
+        function setupControllers() {
+            for (let i = 0; i < 2; i++) {
+                const controller = renderer.xr.getController(i);
+                controller.addEventListener('connected', function(event) {
+                    controller.gamepad = event.data.gamepad;
+                });
+                scene.add(controller);
+                controllers.push(controller);
+            }
+        }
+
+        function createVRMenu() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 256;
+            menuCtx = canvas.getContext('2d');
+            
+            menuTexture = new THREE.CanvasTexture(canvas);
+            const menuGeometry = new THREE.PlaneGeometry(0.4, 0.2);
+            const menuMaterial = new THREE.MeshBasicMaterial({ map: menuTexture, transparent: true });
+            menuMesh = new THREE.Mesh(menuGeometry, menuMaterial);
+            
+            menuMesh.position.set(0, 1.0, -0.6);
+            menuMesh.visible = false;
+            scene.add(menuMesh);
+            updateMenuCanvas();
+        }
+
+        function updateMenuCanvas() {
+            menuCtx.clearRect(0, 0, 512, 256);
+            menuCtx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+            menuCtx.fillRect(0, 0, 512, 256);
+
+            menuCtx.fillStyle = '#ffffff';
+            menuCtx.font = 'bold 24px sans-serif';
+            menuCtx.fillText("TRACK SELECTION (PİST SEÇ)", 30, 40);
+
+            tracks.forEach((track, index) => {
+                menuCtx.fillStyle = (index === selectedTrackIndex) ? '#ffcc00' : '#ffffff';
+                menuCtx.font = '20px sans-serif';
+                menuCtx.fillText(`${index === selectedTrackIndex ? '>' : ' '} ${track.name}`, 40, 100 + (index * 50));
+            });
+
+            if (menuTexture) menuTexture.needsUpdate = true;
+        }
+
+        function loadTrack(index) {
+            if (currentTrackMesh) {
+                scene.remove(currentTrackMesh);
+            }
+            if (currentTrackBody) {
+                world.remove(currentTrackBody);
+            }
+
+            const loader = new THREE.GLTFLoader();
+            loader.load(tracks[index].file, function(gltf) {
+                currentTrackMesh = gltf.scene;
+                currentTrackMesh.scale.set(1, 1, 1);
+                scene.add(currentTrackMesh);
+
+                // Pist için Fizik Çarpışma Kutusu (Static Body) oluşturuluyor
+                const trackBoxShape = new CANNON.Box(new CANNON.Vec3(1.5, 0.02, 1.5));
+                currentTrackBody = new CANNON.Body({ mass: 0 }); // Sabit zemin/pistler için mass = 0
+                currentTrackBody.addShape(trackBoxShape);
+                currentTrackBody.position.set(0, 0.01, -1.0);
+                world.add(currentTrackBody);
+
+            }, undefined, function(error) {
+                console.log("Pist dosyası yüklenemedi.", error);
+            });
+        }
+
+        function handleInput() {
+            throttle = 0;
+            steering = 0;
+
+            controllers.forEach((controller, index) => {
+                if (controller.gamepad) {
+                    const gamepad = controller.gamepad;
+                    
+                    // Sağ Kontrolör (İleri / Geri)
+                    if (gamepad.hand === 'right' || index === 1) {
+                        const triggerVal = gamepad.buttons[0] ? gamepad.buttons[0].value : 0;
+                        const gripVal = gamepad.buttons[1] ? gamepad.buttons[1].value : 0;
+
+                        if (triggerVal > 0.1) throttle += triggerVal * 3.0;
+                        if (gripVal > 0.1) throttle -= gripVal * 2.0;
+                    }
+
+                    // Sol Kontrolör (Yön ve Menü)
+                    if (gamepad.hand === 'left' || index === 0) {
+                        if (gamepad.axes.length >= 2) {
+                            steering = gamepad.axes[2] !== undefined ? gamepad.axes[2] : gamepad.axes[0];
+                        }
+
+                        const menuButton = gamepad.buttons[3] || gamepad.buttons[4];
+                        if (menuButton && menuButton.pressed && !window._menuPressedLastFrame) {
+                            menuVisible = !menuVisible;
+                            menuMesh.visible = menuVisible;
+                        }
+                        window._menuPressedLastFrame = menuButton ? menuButton.pressed : false;
+
+                        if (menuVisible && gamepad.axes.length >= 2) {
+                            let yAxis = gamepad.axes[3] !== undefined ? gamepad.axes[3] : gamepad.axes[1];
+                            if (yAxis < -0.5 && !window._joySwitched) {
+                                selectedTrackIndex = (selectedTrackIndex - 1 + tracks.length) % tracks.length;
+                                updateMenuCanvas();
+                                loadTrack(selectedTrackIndex);
+                                window._joySwitched = true;
+                            } else if (yAxis > 0.5 && !window._joySwitched) {
+                                selectedTrackIndex = (selectedTrackIndex + 1) % tracks.length;
+                                updateMenuCanvas();
+                                loadTrack(selectedTrackIndex);
+                                window._joySwitched = true;
+                            } else if (Math.abs(yAxis) < 0.2) {
+                                window._joySwitched = false;
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function animate() {
+            renderer.setAnimationLoop(render);
+        }
+
+        function render() {
+            handleInput();
+
+            if (physicsEnabled) {
+                world.step(1 / 60);
+
+                const forwardVector = new CANNON.Vec3(0, 0, -1);
+                carBody.quaternion.vmult(forwardVector, forwardVector);
+                
+                carBody.applyForce(new CANNON.Vec3(forwardVector.x * throttle, 0, forwardVector.z * throttle), carBody.position);
+                carBody.angularVelocity.y = -steering * 4.0;
+
+                carMesh.position.copy(carBody.position);
+                carMesh.quaternion.copy(carBody.quaternion);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+    </script>
+</body>
+</html>

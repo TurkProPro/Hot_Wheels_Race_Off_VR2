@@ -3,32 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hot Wheels VR - 1:64 RC Car & Grab</title>
+    <title>Hot Wheels VR - Quest 3 RC Car</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
         #info {
             position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-            color: white; background: rgba(0,0,0,0.85); padding: 15px 25px;
-            border-radius: 8px; font-size: 15px; text-align: center; z-index: 10;
+            color: white; background: rgba(0,0,0,0.85); padding: 12px 20px;
+            border-radius: 8px; font-size: 14px; text-align: center; z-index: 10;
             border: 1px solid #555; pointer-events: none;
         }
+        /* Garantili ve Görünür VR Giriş Butonu */
+        #enter-vr-btn {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: #ff2222; color: white; border: none; padding: 20px 40px;
+            font-size: 22px; font-weight: bold; border-radius: 12px; cursor: pointer;
+            z-index: 100; box-shadow: 0 6px 20px rgba(255,0,0,0.6); display: none;
+        }
+        #enter-vr-btn:hover { background: #ff4444; }
     </style>
 
-    <!-- Three.js, GLTFLoader, Cannon.js ve WebXR VRButton -->
+    <!-- Three.js, GLTFLoader ve Cannon.js Kütüphaneleri -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/webxr/VRButton.js"></script>
 </head>
 <body>
-    <div id="info">Meta Quest 3 VR | Grip Tuşu: Arabayı Tut / Bırak | Sağ Trigger: İleri | Sol Joystick: Yön</div>
+    <button id="enter-vr-btn">VR MODUNA GİR (VR)</button>
+    <div id="info">Grip: Arabayı Tut/Bırak | Sağ Trigger: İleri | Sol Joystick: Yön</div>
 
     <script>
         let camera, scene, renderer;
         let world, carBody, carMesh = null;
         let controllers = [];
         
-        // Etkileşim ve Sürüş Değişkenleri
         let isGrabbed = false;
         let grabbedController = null;
         let throttle = 0;
@@ -38,7 +45,6 @@
         animate();
 
         function init() {
-            // 1. Sahne ve Kamera Kurulumu
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x0a0a14);
 
@@ -47,17 +53,7 @@
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
-
-            // Quest 3 için yer (local-floor) referans alanı sabitleme
-            renderer.xr.addEventListener('sessionstart', () => {
-                const session = renderer.xr.getSession();
-                session.requestReferenceSpace('local-floor').then((refSpace) => {
-                    renderer.xr.setReferenceSpace(refSpace);
-                });
-            });
-
             document.body.appendChild(renderer.domElement);
-            document.body.appendChild(VRButton.createButton(renderer));
 
             // Işıklandırma
             scene.add(new THREE.AmbientLight(0xffffff, 1.0));
@@ -65,42 +61,76 @@
             dirLight.position.set(2, 5, 2);
             scene.add(dirLight);
 
-            // 2. Fizik Dünyası (Cannon.js)
+            // Fizik Dünyası (Cannon.js)
             world = new CANNON.World();
             world.gravity.set(0, -9.82, 0);
             world.broadphase = new CANNON.NaiveBroadphase();
             world.solver.iterations = 10;
 
-            // Gerçek dünya zemini (LocalFloor) için Cannon Plane
+            // Local-Floor Zemin Düzlemi
             const groundShape = new CANNON.Plane();
             const groundBody = new CANNON.Body({ mass: 0 });
             groundBody.addShape(groundShape);
             groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
             world.add(groundBody);
 
-            // 3. Kontrolcüler ve Elde Tutma (Grab) Sistemi
             setupControllers();
-
-            // 4. Hot Wheels Arabayı Yükle ve 1:64 Ölçeklendir
             loadHotWheelsCar();
+            setupVRButton();
 
             window.addEventListener('resize', onWindowResize);
         }
 
+        function setupVRButton() {
+            const vrBtn = document.getElementById('enter-vr-btn');
+
+            if ('xr' in navigator) {
+                navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
+                    if (supported) {
+                        vrBtn.style.display = 'block';
+                        vrBtn.addEventListener('click', async () => {
+                            try {
+                                const session = await navigator.xr.requestSession('immersive-vr', {
+                                    requiredFeatures: ['local-floor']
+                                });
+                                renderer.xr.setSession(session);
+                                vrBtn.style.display = 'none';
+                            } catch (e) {
+                                console.error("VR Oturumu başlatılamadı:", e);
+                                alert("VR Başlatılamadı: " + e.message);
+                            }
+                        });
+                    } else {
+                        vrBtn.innerText = "VR DESTEKLENMİYOR";
+                        vrBtn.style.background = "#555";
+                        vrBtn.style.display = 'block';
+                    }
+                });
+            } else {
+                vrBtn.innerText = "WEBXR DESTEKLENMİYOR";
+                vrBtn.style.background = "#555";
+                vrBtn.style.display = 'block';
+            }
+
+            // VR'dan çıkıldığında butonu tekrar göster
+            renderer.xr.addEventListener('sessionend', () => {
+                vrBtn.style.display = 'block';
+            });
+        }
+
         function loadHotWheelsCar() {
-            // Başlangıçta fiziksel gövde (1:64 gerçek ölçüleri: ~7cm uzunluk, ~3cm genişlik, ~2cm yükseklik)
+            // 1:64 Gerçek Ölçek Fizik Gövdesi (~7cm uzunluk)
             const carShape = new CANNON.Box(new CANNON.Vec3(0.015, 0.01, 0.035));
-            carBody = new CANNON.Body({ mass: 0.05 }); // 50 gram RC araba kütlesi
+            carBody = new CANNON.Body({ mass: 0.05 }); // 50 gram
             carBody.addShape(carShape);
-            carBody.position.set(0, 0.05, -0.5); // Kullanıcının hemen önünde local-floor üzerinde spawn
+            carBody.position.set(0, 0.05, -0.5); // Kullanıcının önünde local-floor üzerinde
             world.add(carBody);
 
-            // hot_wheels_unleashed.glb modelini yükle
             const loader = new THREE.GLTFLoader();
             loader.load('models/assets/hot_wheels_unleashed.glb', (gltf) => {
                 carMesh = gltf.scene;
                 
-                // Modelin orijinal boyutundan bağımsız olarak tam 1:64 (0.07 metre / 7 cm uzunluk) olacak şekilde otomatik ölçekleme
+                // Otomatik 1:64 Ölçek Sabitleme
                 const box = new THREE.Box3().setFromObject(carMesh);
                 const size = new THREE.Vector3();
                 box.getSize(size);
@@ -110,8 +140,7 @@
 
                 scene.add(carMesh);
             }, undefined, (error) => {
-                console.error("hot_wheels_unleashed.glb yüklenemedi! Dosya yolunu veya adını kontrol et.", error);
-                // Yedek görsel kutu
+                console.warn("hot_wheels_unleashed.glb yüklenemedi, yedek kutu kullanılıyor.", error);
                 const geom = new THREE.BoxGeometry(0.03, 0.02, 0.07);
                 const mat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
                 carMesh = new THREE.Mesh(geom, mat);
@@ -128,36 +157,26 @@
                     controller.handedness = event.data.handedness;
                 });
 
-                // Grip (Yan tuş / Squeeze) ile aracı ele alma ve bırakma
+                // Grip (Yan Tuş) ile aracı ele alma / bırakma
                 controller.addEventListener('squeezestart', () => {
                     if (carMesh && !isGrabbed) {
                         const distance = controller.position.distanceTo(carMesh.position);
-                        if (distance < 0.35) { // Araca yakınsa eline al
+                        if (distance < 0.35) {
                             isGrabbed = true;
                             grabbedController = controller;
-                            carBody.mass = 0; // Eldeyken fizik etkimesin
+                            carBody.mass = 0;
                             carBody.velocity.set(0, 0, 0);
                             carBody.angularVelocity.set(0, 0, 0);
                         }
                     } else if (isGrabbed && grabbedController === controller) {
-                        // Elindeyken bırak
-                        releaseCar();
+                        isGrabbed = false;
+                        carBody.mass = 0.05;
                     }
                 });
 
                 scene.add(controller);
                 controllers.push(controller);
             }
-        }
-
-        function releaseCar() {
-            isGrabbed = false;
-            carBody.mass = 0.05; // Fizik kütlesini geri yükle
-            if (grabbedController) {
-                // Controller hızını araca aktararak fırlatabilme imkanı
-                carBody.position.copy(grabbedController.position);
-            }
-            grabbedController = null;
         }
 
         function handleInput() {
@@ -168,13 +187,13 @@
                 if (!controller.gamepad) return;
                 const gp = controller.gamepad;
 
-                // Sağ kontrolör: Trigger -> İleri
+                // Sağ Kontrolör: Trigger -> İleri
                 if (controller.handedness === 'right') {
                     const triggerVal = gp.buttons[0] ? gp.buttons[0].value : 0;
                     if (triggerVal > 0.05) throttle += triggerVal * 3.5;
                 }
 
-                // Sol kontrolör: Joystick X ekseni -> Sağa/Sola Dönüş (Steering)
+                // Sol Kontrolör: Joystick X Ekseni -> Yön (Direksiyon)
                 if (controller.handedness === 'left') {
                     if (gp.axes.length >= 2) {
                         steering = gp.axes[2] !== undefined ? gp.axes[2] : gp.axes[0];
@@ -191,23 +210,19 @@
             handleInput();
 
             if (isGrabbed && grabbedController && carMesh) {
-                // Araba elde tutuluyorsa kontrolcünün pozisyonunu ve rotasyonunu birebir takip etsin
                 carMesh.position.copy(grabbedController.position);
                 carMesh.quaternion.copy(grabbedController.quaternion);
                 carBody.position.copy(carMesh.position);
                 carBody.quaternion.copy(carMesh.quaternion);
             } else {
-                // Fizik simülasyonunu çalıştır
                 world.step(1 / 60);
 
                 const forwardDir = new CANNON.Vec3(0, 0, -1);
                 carBody.quaternion.vmult(forwardDir, forwardDir);
 
-                // İleri itki kuvveti ve direksiyon dönüşü
                 carBody.applyForce(new CANNON.Vec3(forwardDir.x * throttle, 0, forwardDir.z * throttle), carBody.position);
                 carBody.angularVelocity.y = -steering * 5.0;
 
-                // Görsel modeli fizik gövdesiyle senkronize et
                 if (carMesh) {
                     carMesh.position.copy(carBody.position);
                     carMesh.quaternion.copy(carBody.quaternion);
